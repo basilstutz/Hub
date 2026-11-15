@@ -245,6 +245,41 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
 .form-err { color: var(--danger); font-size: 13px; margin: 0; min-height: 1.2em; }
 .form-ok { color: #3f9c5a; font-size: 13px; margin: 0; min-height: 1.2em; }
 
+/* Category editor */
+.ce-intro { margin: -8px 0 0; font-size: 13px; color: var(--muted); }
+.ce-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 56vh; overflow-y: auto; }
+.ce-row {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start;
+  padding: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg);
+}
+.ce-dot {
+  width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--line); background: hsl(var(--h) 62% var(--chip-l)); margin-top: 7px; padding: 0;
+}
+.ce-fields { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.ce-fields input {
+  border: 1px solid transparent; background: transparent; border-radius: 8px; padding: 5px 8px; width: 100%; outline: none;
+}
+.ce-fields input:hover { border-color: var(--line); }
+.ce-fields input:focus { border-color: var(--accent); background: var(--surface); }
+.ce-name { font-weight: 500; font-size: 15px; }
+.ce-hint { font-size: 13px; color: var(--muted); }
+.ce-meta { font-size: 12px; color: var(--muted); padding: 0 8px; }
+.ce-acts { display: flex; gap: 2px; align-items: center; }
+.ce-acts button {
+  border: 0; background: none; color: var(--muted); border-radius: 8px; padding: 5px 7px; font-size: 13px; line-height: 1;
+}
+.ce-acts button:hover:not([disabled]) { background: var(--sidebar); color: var(--ink); }
+.ce-acts button[disabled] { opacity: .3; }
+.ce-acts .ce-del.confirm { color: var(--danger); background: var(--surface); box-shadow: 0 0 0 1px var(--danger); }
+.ce-swatches { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 2px 32px; }
+.ce-swatches button {
+  width: 22px; height: 22px; border-radius: 50%; padding: 0; border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--line); background: hsl(var(--h) 62% var(--chip-l));
+}
+.ce-swatches button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--ink); }
+.pick-empty { font-size: 13px; color: var(--muted); }
+
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px);
   background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 14px;
@@ -385,6 +420,7 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
                 <button type="button" data-match="all" aria-pressed="false">All</button>
               </span>
               <button type="button" class="linkish" id="clearCats" hidden>Clear</button>
+              <button type="button" class="linkish" id="editCats">Edit categories</button>
             </span>
           </div>
           <div class="chips" id="chips"></div>
@@ -462,6 +498,26 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
   </div>
 </div>
 
+<!-- ============ Category editor ============ -->
+<div class="overlay" id="catsDlg" aria-hidden="true">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="ceTitle">
+    <div class="d-head">
+      <h2 id="ceTitle">Categories</h2>
+      <button type="button" class="btn" id="ceAdd">+ New category</button>
+    </div>
+    <p class="ce-intro">Rename, describe, recolor or reorder them. Deleting a category removes it from every title that has it.</p>
+    <ol class="ce-list" id="ceList"></ol>
+    <p class="form-err" id="ceErr" role="alert"></p>
+    <div class="d-foot">
+      <button type="button" class="linkish" id="ceReset">Restore the original 14</button>
+      <div class="right">
+        <button type="button" class="btn" id="ceCancel">Cancel</button>
+        <button type="button" class="btn primary" id="ceSave">Save categories</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ============ Settings dialog ============ -->
 <div class="overlay" id="settings" aria-hidden="true">
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="stTitle">
@@ -521,7 +577,8 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
   var CONFIG = { owner: "", repo: "", branch: "main", dataPath: "data.enc.json" };
   var ITER = 600000; // PBKDF2 iterations
 
-  var CATS = [
+  // Starting set for a new list. Your own categories are saved (encrypted) with the list.
+  var DEFAULT_CATS = [
     { id: "mind",     name: "Mind-benders",          hint: "Still untangling it the next day" },
     { id: "awe",      name: "Existential awe",       hint: "Makes you feel small in a good way" },
     { id: "gut",      name: "Gut-punches",           hint: "Emotionally wrecks you" },
@@ -537,8 +594,25 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
     { id: "friends",  name: "Fun with friends",      hint: "Best enjoyed loud and in company" },
     { id: "epic",     name: "Epic journeys",         hint: "Big worlds and long quests" }
   ];
-  var HUE = {}, CAT_BY_ID = {};
-  CATS.forEach(function (c, i) { HUE[c.id] = Math.round(i * 360 / CATS.length + 18) % 360; CAT_BY_ID[c.id] = c; });
+  var SWATCHES = [10, 32, 52, 80, 120, 158, 180, 200, 222, 250, 280, 310, 335];
+  DEFAULT_CATS.forEach(function (c, i) { c.hue = Math.round(i * 360 / DEFAULT_CATS.length + 18) % 360; });
+  var CATS = [], HUE = {}, CAT_BY_ID = {};
+  function setCats(list) {
+    CATS = list; HUE = {}; CAT_BY_ID = {};
+    CATS.forEach(function (c) { HUE[c.id] = c.hue; CAT_BY_ID[c.id] = c; });
+  }
+  function cleanCats(list) {
+    if (!Array.isArray(list)) return null;
+    var seen = new Set();
+    return list.filter(function (c) {
+      if (!c || typeof c.id !== "string" || !c.id || seen.has(c.id) || typeof c.name !== "string" || !c.name.trim()) return false;
+      seen.add(c.id); return true;
+    }).map(function (c) {
+      return { id: c.id, name: c.name.trim(), hint: typeof c.hint === "string" ? c.hint : "", hue: isFinite(c.hue) ? ((+c.hue % 360) + 360) % 360 : 200 };
+    });
+  }
+  function defaultCats() { return DEFAULT_CATS.map(function (c) { return Object.assign({}, c); }); }
+  setCats(defaultCats());
 
   var $ = function (id) { return document.getElementById(id); };
   var LS = {
@@ -551,7 +625,7 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
   var S = {
     phase: "loading", file: null, sha: null,
     key: null, salt: null, iter: ITER,
-    items: [], dirty: new Set(), deleted: new Set(), rev: 0, forceSave: false,
+    items: [], dirty: new Set(), deleted: new Set(), rev: 0, forceSave: false, catsDirty: false,
     saving: false, saveState: "saved", saveError: "", timer: null
   };
   var view = { type: "movie", status: "all", cats: new Set(), match: "any", q: "" };
@@ -688,7 +762,7 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
 
   function writeFile() {
     var cfg = getCfg();
-    return seal({ version: 1, savedAt: nowIso(), items: S.items }).then(function (file) {
+    return seal({ version: 2, savedAt: nowIso(), categories: CATS, items: S.items }).then(function (file) {
       var body = { message: "Update hub data", content: btoa(JSON.stringify(file)), branch: cfg.branch };
       if (S.sha) body.sha = S.sha;
       return gh("PUT", contentsPath(cfg), body).catch(function () { throw new Error(netErr()); }).then(function (r) {
@@ -712,6 +786,7 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
           if (local) map.set(id, local);
         });
         S.items = Array.from(map.values());
+        if (!S.catsDirty) { var rc = cleanCats(data.categories); if (rc) setCats(rc); }
         S.sha = res.sha;
       });
     });
@@ -736,11 +811,11 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
     clearTimeout(S.timer);
     if (!canWrite()) return Promise.resolve();
     if (S.saving) { S.again = true; return S.savingPromise; }
-    if (!S.dirty.size && !S.deleted.size && !S.forceSave) { S.saveState = "saved"; updateSaveUI(); return Promise.resolve(); }
+    if (!S.dirty.size && !S.deleted.size && !S.forceSave && !S.catsDirty) { S.saveState = "saved"; updateSaveUI(); return Promise.resolve(); }
     S.saving = true; S.saveState = "saving"; updateSaveUI();
     var revAtStart = S.rev;
     S.savingPromise = writeWithRetry().then(function () {
-      if (S.rev === revAtStart) { S.dirty.clear(); S.deleted.clear(); S.forceSave = false; S.saveState = "saved"; }
+      if (S.rev === revAtStart) { S.dirty.clear(); S.deleted.clear(); S.forceSave = false; S.catsDirty = false; S.saveState = "saved"; }
       else S.saveState = "pending";
     }, function (e) {
       S.saveState = "error"; S.saveError = e.message || "Couldn’t save.";
@@ -751,7 +826,7 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
     return S.savingPromise;
   }
   window.addEventListener("beforeunload", function (e) {
-    if (S.phase === "app" && (S.saveState === "pending" || S.saveState === "saving" || S.saveState === "error") && (S.dirty.size || S.deleted.size || S.forceSave)) {
+    if (S.phase === "app" && (S.saveState === "pending" || S.saveState === "saving" || S.saveState === "error") && (S.dirty.size || S.deleted.size || S.forceSave || S.catsDirty)) {
       e.preventDefault(); e.returnValue = "";
     }
   });
@@ -812,7 +887,10 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
   function enterApp(key, salt, iter, data) {
     S.key = key; S.salt = salt; S.iter = iter;
     S.items = cleanItems(data && data.items);
-    S.dirty.clear(); S.deleted.clear(); S.rev = 0; S.forceSave = false;
+    var dc = cleanCats(data && data.categories);
+    setCats(dc || defaultCats());
+    S.dirty.clear(); S.deleted.clear(); S.rev = 0; S.forceSave = false; S.catsDirty = false;
+    view.cats.forEach(function (id) { if (id !== "__none" && !CAT_BY_ID[id]) view.cats.delete(id); });
     S.saveState = canWrite() ? "saved" : "readonly";
     S.phase = "app";
     $("gate").hidden = true; $("app").hidden = false;
@@ -862,7 +940,7 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
       S.key = null; S.items = []; S.dirty.clear(); S.deleted.clear();
       closeDialog(); showGate("loading"); boot();
     };
-    if (S.dirty.size || S.deleted.size || S.forceSave) {
+    if (S.dirty.size || S.deleted.size || S.forceSave || S.catsDirty) {
       flush().then(function () {
         if (S.saveState === "error") { toast("Couldn’t save your last changes. Fix that before locking."); return; }
         go();
@@ -940,6 +1018,7 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
     }
     $("chips").innerHTML = html;
     var n = view.cats.size;
+    $("editCats").hidden = !canWrite();
     $("clearCats").hidden = !n;
     $("matchSeg").hidden = n < 2;
     document.querySelectorAll("#matchSeg [data-match]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.match === view.match)); });
@@ -1014,10 +1093,14 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
     });
   });
   document.addEventListener("keydown", function (e) {
-    var anyOpen = $("overlay").classList.contains("open") || $("settings").classList.contains("open");
+    var anyOpen = $("overlay").classList.contains("open") || $("settings").classList.contains("open") || $("catsDlg").classList.contains("open");
     var tag = document.activeElement && document.activeElement.tagName;
     if (e.key === "/" && S.phase === "app" && !anyOpen && tag !== "INPUT" && tag !== "TEXTAREA") { e.preventDefault(); $("q").focus(); }
-    if (e.key === "Escape") { if ($("settings").classList.contains("open")) closeSettings(); else if ($("overlay").classList.contains("open")) closeDialog(); }
+    if (e.key === "Escape") {
+      if ($("settings").classList.contains("open")) closeSettings();
+      else if ($("catsDlg").classList.contains("open")) closeCatsEditor();
+      else if ($("overlay").classList.contains("open")) closeDialog();
+    }
   });
   $("listArea").addEventListener("click", function (e) {
     var t = e.target.closest("[data-toggle]");
@@ -1035,6 +1118,7 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
   var dlg = { mode: "one", editId: null, type: "movie", status: "want", cats: new Set(), confirmDel: false };
   function setSeg(el, v) { el.querySelectorAll("[data-v]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.v === v)); }); }
   function renderPick() {
+    if (!CATS.length) { $("fCats").innerHTML = '<span class="pick-empty">No categories yet. Add some with “Edit categories” above the filter.</span>'; $("catsHint").textContent = ""; return; }
     $("fCats").innerHTML = CATS.map(function (c) {
       return '<button type="button" class="chip" data-cat="' + c.id + '" aria-pressed="' + dlg.cats.has(c.id) +
         '" title="' + esc(c.hint) + '" style="--h:' + HUE[c.id] + '"><span class="dot"></span>' + esc(c.name) + '</button>';
@@ -1131,6 +1215,100 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
     deleteItem(dlg.editId); toast("Deleted"); closeDialog(); render(); changed();
   });
 
+  /* ---------------- Category editor ---------------- */
+  var ce = { draft: [], swatchFor: null, confirmDel: null };
+  function usage(id) { return S.items.filter(function (it) { return catsOf(it).indexOf(id) >= 0; }).length; }
+  function nextHue() {
+    var free = SWATCHES.filter(function (h) { return !ce.draft.some(function (c) { return c.hue === h; }); });
+    return free.length ? free[0] : SWATCHES[ce.draft.length % SWATCHES.length];
+  }
+  function openCatsEditor() {
+    if (!canWrite()) return;
+    ce.draft = CATS.map(function (c) { return Object.assign({}, c); });
+    ce.swatchFor = null; ce.confirmDel = null; $("ceErr").textContent = "";
+    renderCe();
+    $("catsDlg").classList.add("open"); $("catsDlg").setAttribute("aria-hidden", "false");
+  }
+  function closeCatsEditor() { $("catsDlg").classList.remove("open"); $("catsDlg").setAttribute("aria-hidden", "true"); }
+  function renderCe() {
+    var last = ce.draft.length - 1;
+    $("ceList").innerHTML = ce.draft.length ? ce.draft.map(function (c, i) {
+      var n = c.isNew ? 0 : usage(c.id), confirming = ce.confirmDel === c.id;
+      var meta = c.isNew ? "New" : (n === 1 ? "Used by 1 title" : "Used by " + n + " titles");
+      var sw = ce.swatchFor === c.id ? '<div class="ce-swatches" role="group" aria-label="Color">' + SWATCHES.map(function (h) {
+        return '<button type="button" data-act="hue" data-hue="' + h + '" style="--h:' + h + '" aria-pressed="' + (h === c.hue) + '" aria-label="Color ' + h + '"></button>';
+      }).join("") + '</div>' : "";
+      return '<li class="ce-row" data-id="' + esc(c.id) + '" style="--h:' + c.hue + '">' +
+        '<button type="button" class="ce-dot" data-act="color" aria-expanded="' + (ce.swatchFor === c.id) + '" aria-label="Change color" title="Change color"></button>' +
+        '<div class="ce-fields">' +
+          '<input class="ce-name" id="ce-name-' + esc(c.id) + '" data-field="name" value="' + esc(c.name) + '" placeholder="Category name" aria-label="Name" maxlength="40" autocomplete="off">' +
+          '<input class="ce-hint" id="ce-hint-' + esc(c.id) + '" data-field="hint" value="' + esc(c.hint) + '" placeholder="Short description (optional)" aria-label="Description" maxlength="80" autocomplete="off">' +
+          '<span class="ce-meta">' + meta + '</span>' +
+        '</div>' +
+        '<div class="ce-acts">' +
+          '<button type="button" data-act="up" aria-label="Move up" title="Move up"' + (i === 0 ? " disabled" : "") + '>↑</button>' +
+          '<button type="button" data-act="down" aria-label="Move down" title="Move down"' + (i === last ? " disabled" : "") + '>↓</button>' +
+          '<button type="button" class="ce-del' + (confirming ? " confirm" : "") + '" data-act="del">' +
+            (confirming ? "Remove from " + n + "?" : "Delete") + '</button>' +
+        '</div>' + sw + '</li>';
+    }).join("") : '<li class="ce-meta">No categories left. Add one to keep sorting by mood.</li>';
+  }
+  $("ceList").addEventListener("input", function (e) {
+    var f = e.target.dataset.field, row = e.target.closest("[data-id]"); if (!f || !row) return;
+    var c = ce.draft.find(function (x) { return x.id === row.dataset.id; }); if (c) c[f] = e.target.value;
+  });
+  $("ceList").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-act]"), row = e.target.closest("[data-id]"); if (!b || !row) return;
+    var i = ce.draft.findIndex(function (x) { return x.id === row.dataset.id; }); if (i < 0) return;
+    var c = ce.draft[i], act = b.dataset.act, focusSel = null;
+    if (act !== "del") ce.confirmDel = null;
+    if (act === "color") ce.swatchFor = ce.swatchFor === c.id ? null : c.id;
+    if (act === "hue") { c.hue = +b.dataset.hue; ce.swatchFor = null; }
+    if (act === "up" && i > 0) { ce.draft.splice(i - 1, 0, ce.draft.splice(i, 1)[0]); focusSel = '[data-id="' + c.id + '"] [data-act="' + (i - 1 === 0 ? "down" : "up") + '"]'; }
+    if (act === "down" && i < ce.draft.length - 1) { ce.draft.splice(i + 1, 0, ce.draft.splice(i, 1)[0]); focusSel = '[data-id="' + c.id + '"] [data-act="' + (i + 1 === ce.draft.length - 1 ? "up" : "down") + '"]'; }
+    if (act === "del") {
+      if (c.isNew || !usage(c.id) || ce.confirmDel === c.id) { ce.draft.splice(i, 1); ce.confirmDel = null; if (ce.swatchFor === c.id) ce.swatchFor = null; }
+      else ce.confirmDel = c.id;
+    }
+    renderCe();
+    if (focusSel) { var el = $("ceList").querySelector(focusSel); if (el) el.focus(); }
+  });
+  $("ceAdd").addEventListener("click", function () {
+    var id = "c-" + newId().replace(/-/g, "").slice(0, 10);
+    ce.draft.push({ id: id, name: "", hint: "", hue: nextHue(), isNew: true });
+    ce.confirmDel = null; renderCe();
+    var inp = $("ce-name-" + id); if (inp) { inp.focus(); inp.scrollIntoView({ block: "nearest" }); }
+  });
+  $("ceReset").addEventListener("click", function () {
+    ce.draft = defaultCats(); ce.swatchFor = null; ce.confirmDel = null; $("ceErr").textContent = "";
+    renderCe();
+  });
+  $("ceCancel").addEventListener("click", closeCatsEditor);
+  $("catsDlg").addEventListener("mousedown", function (e) { if (e.target === $("catsDlg")) closeCatsEditor(); });
+  $("ceSave").addEventListener("click", function () {
+    var err = $("ceErr"); err.textContent = "";
+    var draft = ce.draft.filter(function (c) { return !(c.isNew && !c.name.trim() && !c.hint.trim()); });
+    var unnamed = draft.find(function (c) { return !c.name.trim(); });
+    if (unnamed) { err.textContent = "Every category needs a name."; var u = $("ce-name-" + unnamed.id); if (u) u.focus(); return; }
+    var seen = {}, dup = null;
+    draft.forEach(function (c) { var k = norm(c.name); if (seen[k]) dup = c.name.trim(); seen[k] = true; });
+    if (dup) { err.textContent = "There are two categories called “" + dup + "”. Give them different names."; return; }
+    var next = draft.map(function (c) { return { id: c.id, name: c.name.trim(), hint: (c.hint || "").trim(), hue: c.hue }; });
+    var keep = new Set(next.map(function (c) { return c.id; }));
+    var touched = 0;
+    S.items.forEach(function (it) {
+      var cs = Array.isArray(it.cats) ? it.cats : [];
+      var kept = cs.filter(function (id) { return keep.has(id); });
+      if (kept.length !== cs.length) { updateItem(it.id, { cats: kept }); touched++; }
+    });
+    setCats(next);
+    view.cats.forEach(function (id) { if (id !== "__none" && !keep.has(id)) view.cats.delete(id); });
+    S.catsDirty = true;
+    closeCatsEditor(); render(); changed();
+    toast("Categories saved" + (touched ? ", updated " + touched + " title" + (touched === 1 ? "" : "s") : ""));
+  });
+  $("editCats").addEventListener("click", openCatsEditor);
+
   /* ---------------- Settings ---------------- */
   function openSettings() {
     var c = getCfg();
@@ -1179,7 +1357,10 @@ kbd { font-family: var(--body); font-size: 11px; border: 1px solid var(--line); 
       // Switch from the public file to the API so saves have the latest version to build on.
       loadRemote().then(function (res) {
         S.sha = res.sha;
-        if (res.file) return unseal(res.file, S.key).then(function (data) { S.items = cleanItems(data.items); });
+        if (res.file) return unseal(res.file, S.key).then(function (data) {
+          S.items = cleanItems(data.items);
+          var rc = cleanCats(data.categories); if (rc) setCats(rc);
+        });
       }).catch(function (ex) { S.saveState = "error"; S.saveError = ex.message || ""; })
         .then(function () { if (S.saveState !== "error") S.saveState = "saved"; render(); });
     } else render();
